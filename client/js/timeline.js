@@ -16,6 +16,7 @@
 	
 	timeline.startTime=1364774400;//开始时间
 	timeline.curTime=Observer.starttime;//实时进行到的时间，不断+60s，递增
+	//timeline.curTime_bak=Observer.starttime;//实时进行到的时间，不断+60s，递增
 	
 	timeline.daynum=7;
 	timeline.hournum=24;
@@ -552,6 +553,7 @@
 			success: function(evt_data) {
 				console.log(evt_data);
 				timeline.curTime=timeline.curTime+60;
+				//timeline.curTime_bak=timeline.curTime;
 				var daydiffer=Math.floor((timeline.curTime-timeline.startTime)/(24*3600))
 				var tmpDate=new Date(timeline.curTime*1000-8*60*60*1000);
 				timeline.dayselected=[daydiffer];
@@ -601,6 +603,9 @@
 				});
 			}
         }
+		if (message == "matrixClickTime") {
+			if(data!=-1){timeline.skiptime(data);}
+		}
     };
 	
 	

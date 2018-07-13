@@ -34,6 +34,7 @@ def initSOINN(p_data, p_agemax, p_lambda, p_c, finnal_denoise):
                 minind2=j
         # prototype, connection and age update
         #如果大于阈值，生成一个新的节点
+        if minval==0:continue
         if minval>threshold[minind] or minval2>threshold[minind2]:
             node.append(p_data[i])
             threshold.append(minval2+minval)
@@ -120,16 +121,17 @@ def initSOINN(p_data, p_agemax, p_lambda, p_c, finnal_denoise):
 
 
 
-def connect2json(features_TSNE,connection,age,wincnt,threshold):
+def connect2json(features,features_TSNE,connection,age,wincnt,threshold):
     nodes=[]
     links=[]
     for i in range(len(connection)):
-        nodes.append({"id":i,"wincnt":wincnt[i],"feature":features_TSNE[i].tolist(),"threshold":threshold[i],"type":"uncertain","certainty":0})
+        nodes.append({"id":i,"wincnt":wincnt[i],"features_all":features[i].tolist(),"feature":features_TSNE[i].tolist(),"threshold":threshold[i],"type":"uncertain","certainty":[0,0,1],"labeled":0})
     for i in range(len(connection)):
         for j in range(i,len(connection)):
             if(connection[i][j]>0):
                 links.append({"source":i,"target":j,"cnt":connection[i][j],"age":age[i][j]})
     return nodes,links
+
 
 def calcu_dis(nodes):
     nodesnum=nodes.shape[0]
@@ -244,4 +246,71 @@ def matchdata2(p_data,node,connection,wincnt,threshold,age, p_agemax):
 
 
     return timematcharr,node,connection,wincnt,threshold,age
+
+def SOINN_addnode(newfeat,node,connection,wincnt,threshold,age):
+    # 找出与newfeat最相似的两个神经元
+    minval = 1000000
+    minval2 = 1000000
+    minind = -1
+    minind2 = -1
+    for j in xrange(len(node)):
+        dis = LA.norm(newfeat - node[j])
+        if dis < minval:
+            minval2 = minval
+            minind2 = minind
+            minval = dis
+            minind = j
+        elif dis < minval2:
+            minval2 = dis
+            minind2 = j
+
+    # 增加节点
+    node.append(newfeat)
+    threshold.append(minval2 + minval)
+    wincnt.append(1)
+    connection = np.row_stack((connection, np.zeros(connection.shape[1])))
+    connection = np.column_stack((connection, np.zeros(connection.shape[0])))
+    age = np.row_stack((age, np.zeros(age.shape[1])))
+    age = np.column_stack((age, np.zeros(age.shape[0])))
+
+    #新增加的节点与两个胜者节点连接
+    newind=len(node)-1
+    connection[minind][newind] = 1
+    connection[newind][minind] = 1
+    connection[minind2][newind] = 1
+    connection[newind][minind2] = 1
+
+    # 反向更新两个胜者节点的权值
+    node[minind] = node[minind] - (1 / float(wincnt[minind])) * (newfeat - node[minind])
+    node[minind2] = node[minind2] - (0.01 / float(wincnt[minind2])) * (newfeat - node[minind2])
+
+    # 更新两个胜者节点的阈值
+    nnz = len(np.where(connection[minind] != 0)[0])
+    if nnz == 0:
+        threshold[minind] = LA.norm(node[minind] - node[minind2])
+    else:
+        v1 = np.where(connection[minind] != 0)[0]
+        maxdis1 = 0
+        for j in xrange(len(v1)):
+            distance = LA.norm(node[minind] - node[v1[j]])
+            if distance > maxdis1:
+                maxdis1 = distance
+        threshold[minind] = maxdis1
+    nnz2 = len(np.where(connection[minind2] != 0)[0])
+    if nnz2 == 0:
+        threshold[minind2] = LA.norm(node[minind] - node[minind2])
+    else:
+        v2 = np.where(connection[minind2] != 0)[0]
+        maxdis2 = 0
+        for j in xrange(len(v2)):
+            distance = LA.norm(node[minind2] - node[v2[j]])
+            if distance > maxdis2:
+                maxdis2 = distance
+        threshold[minind2] = maxdis2
+
+    if connection[minind][minind2] >0:
+        connection[minind][minind2] =0
+        connection[minind2][minind] =0
+    return node, connection, wincnt, threshold, age,minind,minind2
+
 

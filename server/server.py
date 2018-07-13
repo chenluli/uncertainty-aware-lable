@@ -18,7 +18,8 @@ from soinn import *
 import random
 from sklearn.manifold import TSNE
 from sklearn.manifold import MDS
-
+import operator
+import copy
 '''
 newtest = np.array([[-0.06685685,  0.05367819, -0.08977896,  2.40567605,  1.58864089, -0.12820046,
    0.2649854,   0.60084742,  0.50951567,  0.07818669,  1.00566211,  0.81230254,
@@ -120,16 +121,52 @@ timematchnode1=np.array(timematchnode)
 
 print("reduce dimension")
 soinn_node = np.array(soinn_node)
-soinn_node_embedded = TSNE(n_components=2).fit_transform(soinn_node)
+soinn_node_embedded = TSNE(n_components=2,learning_rate=380).fit_transform(soinn_node)
 
 print("init distance")
 soinn_distance=calcu_dis(soinn_node)
 print("init uncertainty")
+typearr = np.array(["normal", "abnormal", "uncertain"])
 nodenum=soinn_node.shape[0]
-soinn_uncertainty=np.zeros((2,nodenum))#normal,abnormal
+soinn_certainty=np.zeros((nodenum,3))#normal,abnormal,uncertain
+for i in range(len(soinn_certainty)):
+    soinn_certainty[i][2]=1
 print("connect2json")
-nodes, links=connect2json(soinn_node_embedded,soinn_connection,soinn_age,soinn_wincnt,soinn_threshold)
+nodes, links=connect2json(soinn_node,soinn_node_embedded,soinn_connection,soinn_age,soinn_wincnt,soinn_threshold)
+def nodesinthre():
+    #把wincnt不映射到节点获胜次数 而是映射到节点阈值内的其他节点个数
+    for i in range(len(soinn_node)):
+        tmpnum=0
+        for j in range(len(soinn_node)):
+            if soinn_distance[i][j]<soinn_threshold[i] and j!=i:
+                tmpnum=tmpnum+1
+        nodes[i]["wincnt"]=tmpnum
+nodesinthre()
+def classnodes():
+    #为了chaeck是否把相似的节点聚在了一起 提前label节点类型
+    global nodes
+    for i in range(len(nodes)):
+        tmptimes=[]
+        for j in range(len(timematchnode)):
+            for k in range(len(timematchnode[j])):
+                if int(timematchnode[j][k].split("_")[1])==i:
+                    tmptimes.append(j)
+        normalnum=0
+        abnormalnum=0
+        for j in range(len(tmptimes)):
+            if(timelabels[tmptimes[j]]==0):
+                normalnum=normalnum+1
+            else:
+                abnormalnum=abnormalnum+1
 
+        if normalnum+abnormalnum==0:
+            nodes[i]["type"] = "normal"
+        elif abnormalnum/float(normalnum+abnormalnum)>0.1:
+            nodes[i]["type"]="abnormal"
+        else:
+            nodes[i]["type"] = "normal"
+        print(i,normalnum, abnormalnum,nodes[i]["type"])
+#classnodes()
 
 queryprecondition=" and firstSeenSrcIP!=2885681153 and firstSeenDestIP!=2885681153 and firstSeenSrcPort!=0 and firstSeenDestPort!=0 and firstSeenDestIP!=4026531834 "
 
@@ -314,6 +351,73 @@ def timematch_stack():
 timematch_stack()
 
 
+
+
+#更新隶属度
+def updateMembershipValue(k,cluster_id,cluster_type):
+#    p = float(2/(m-1))
+
+    #soinn_certainty_new
+    soinn_certainty_new = np.zeros((nodenum, 3))
+    for i in range(len(soinn_certainty_new)):
+        for j in range(3):
+            soinn_certainty_new[i][j] = soinn_certainty[i][j]
+    #遍历每个节点 求各类的隶属度
+    for i in range(len(soinn_node)):
+        #label过的节点不动
+        if nodes[i]["labeled"]==1:
+            continue
+        cluster_type_tmp=copy.deepcopy(cluster_type)
+        distances=[]
+        for j in range(k):
+            distances.append(soinn_distance[i][cluster_id[j]])
+        #加入在阈值范围内的节点作为额外的center
+        #更新type distances
+        for j in range(len(soinn_node)):
+            if soinn_distance[i][j]<soinn_threshold[i] and j!=i and not(j in cluster_id):
+                cluster_type_tmp.append(nodes[j]["type"])
+                tmptypeind=np.where(typearr == nodes[j]["type"])[0][0]
+                tmpdis=soinn_distance[i][j]/soinn_certainty[j][tmptypeind]
+                distances.append(tmpdis)
+            if len(cluster_type_tmp)-len(cluster_type)>3:
+                break
+
+        #如果阈值范围内没有其他节点，加入最近的节点
+        if(len(cluster_type_tmp)==len(cluster_type)):
+            nearestnodeid=-1
+            nearestdis=10000
+            for j in range(len(soinn_distance)):
+                if j!=i and soinn_distance[i][j]<nearestdis and not(j in cluster_id):
+                    nearestdis=soinn_distance[i][j]
+                    nearestnodeid=j
+            cluster_type_tmp.append(nodes[nearestnodeid]["type"])
+            tmptypeind = np.where(typearr == nodes[nearestnodeid]["type"])[0][0]
+            tmpdis = soinn_distance[i][nearestnodeid]/soinn_certainty[nearestnodeid][tmptypeind]
+            distances.append(tmpdis)
+        tmpcertainty=[0,0,0]
+        #统计隶属度
+
+        kk = len(cluster_type_tmp)
+        for j in range(kk):
+            den = sum([math.pow(float(distances[j]/distances[c]), 2) for c in range(kk)])
+            tmptype=cluster_type_tmp[j]
+            tmptypeind = np.where(typearr == tmptype)[0][0]
+            tmpcertainty[tmptypeind] = tmpcertainty[tmptypeind]+float(1/den)
+        tmpsum=np.sum(tmpcertainty)
+        for j in range(len(tmpcertainty)):
+            soinn_certainty_new[i][j]=tmpcertainty[j]/tmpsum
+    totaldis=0
+    for i in range(len(soinn_certainty_new)):
+        for j in range(3):
+            totaldis=totaldis+(soinn_certainty_new[i][j]-soinn_certainty[i][j])*(soinn_certainty_new[i][j]-soinn_certainty[i][j])
+    return soinn_certainty_new,totaldis
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return float(o)
+        super(DecimalEncoder, self).default(o)
+
 #======================timeline func=============================
 class initTimeline(tornado.web.RequestHandler):
   def get(self):
@@ -391,7 +495,7 @@ class selectSoinnNode(tornado.web.RequestHandler):
 #======================soinn=============================
 class init_soinn(tornado.web.RequestHandler):
   def get(self):
-    evt_unpacked = {'nodes': nodes,'links':links}
+    evt_unpacked = {'nodes': nodes,'links':links,'distance':soinn_distance.tolist()}
     evt = json.dumps(evt_unpacked)
     self.write(evt)
 
@@ -423,13 +527,303 @@ class modifySoinn(tornado.web.RequestHandler):
     evt = json.dumps(evt_unpacked)
     self.write(evt)
 
+class labelSoinn(tornado.web.RequestHandler):
+  def get(self):
+    type=0 #type=0 uncertain也有概率; type=1 uncertain没有概率
+    centernodes=json.loads(self.get_argument('labelednodes'))
+    normalthre = float(json.loads(self.get_argument('normalthre')))
+    abnormalthre = float(json.loads(self.get_argument('abnormalthre')))
+    # 初始化聚类中心
+    k = len(centernodes)
+    cluster_id = []
+    cluster_type = []
+    for i in range(k):
+        cluster_id.append(int(centernodes[i]["id"]))
+        cluster_type.append(centernodes[i]["type"])
+    # 更新label的节点
+    for i in range(k):
+        nodes[cluster_id[i]]["labeled"] = 1
+        nodes[cluster_id[i]]["type"] = cluster_type[i]
+        nodes[cluster_id[i]]["certainty"] = [0, 0, 0]
+        soinn_certainty[cluster_id[i]] = [0, 0, 0]
+        tmptypeind = np.where(typearr == cluster_type[i])[0][0]
+        nodes[cluster_id[i]]["certainty"][tmptypeind] = 1
+        soinn_certainty[cluster_id[i]][tmptypeind] = 1
+    #聚类中心阈值内的点归为和聚类中心一类
+    #如果一个点同时在多种聚类中心阈值内，根据距离求概率
+    for i in range(len(soinn_distance)):
+        if i in cluster_id:
+            continue
+        normal_min_dis = 1000
+        normal_min_ind = -1
+        abnormal_min_dis = 1000
+        abnormal_min_ind = -1
+        for j in range(k):
+            tmpcenterind=cluster_id[j]
+            if soinn_distance[i][tmpcenterind]<soinn_threshold[tmpcenterind]:
+                if cluster_type[j]=="normal" and soinn_distance[i][tmpcenterind]<normal_min_dis:
+                    normal_min_dis=soinn_distance[i][tmpcenterind]
+                    normal_min_ind = tmpcenterind
+                elif cluster_type[j]=="abnormal" and soinn_distance[i][tmpcenterind]<abnormal_min_dis:
+                    abnormal_min_dis=soinn_distance[i][tmpcenterind]
+                    abnormal_min_ind = tmpcenterind
+        if normal_min_ind==-1 and abnormal_min_ind==-1:
+            continue
+        elif normal_min_ind!=-1 and abnormal_min_ind!=-1:
+            tmpnormalperc=normal_min_dis/(normal_min_dis+abnormal_min_dis)
+            tmpabnormalperc=1-tmpnormalperc
+            nodes[i]["certainty"] = [tmpnormalperc, tmpabnormalperc, 0]
+            soinn_certainty[i]= [tmpnormalperc, tmpabnormalperc, 0]
+            if tmpnormalperc>tmpabnormalperc :
+                nodes[i]["type"] = "normal"
+            elif tmpabnormalperc>tmpnormalperc:
+                nodes[i]["type"] = "abnormal"
+            else:
+                nodes[i]["type"] = "uncertain"
+        elif normal_min_ind!=-1:
+            nodes[i]["type"] = "normal"
+            nodes[i]["certainty"] = [1, 0, 0]
+            soinn_certainty[i] = [1, 0, 0]
+        else:
+            nodes[i]["type"] = "abnormal"
+            nodes[i]["certainty"] = [0, 1, 0]
+            soinn_certainty[i] = [0, 1, 0]
+    #最多迭代10次
+    for i in range(10):
+        # 求解隶属矩阵
+        soinn_certainty_new, totaldis = updateMembershipValue(k, cluster_id, cluster_type)
+        print(totaldis)
+        #更新隶属矩阵
+        for i in range(len(soinn_certainty_new)):
+            for j in range(3):
+                soinn_certainty[i][j]=soinn_certainty_new[i][j]
+            # 如果normal和abnormal都有可能 标记为其中一个 不考虑uncertain
+            if type==1:
+                if soinn_certainty_new[i][0]*soinn_certainty_new[i][1]*soinn_certainty_new[i][2]!=0:
+                    soinn_certainty_new[i][0]=soinn_certainty_new[i][0]/(soinn_certainty_new[i][0]+soinn_certainty_new[i][1])
+                    soinn_certainty_new[i][1]=soinn_certainty_new[i][1]/(soinn_certainty_new[i][0]+soinn_certainty_new[i][1])
+                    soinn_certainty_new[i][2]=0
+        # 求每个节点可能的类型
+        for i in range(len(nodes)):
+            # label过的节点不动
+            if nodes[i]["labeled"] == 1:
+                continue
+            nodes[i]["certainty"][0] = soinn_certainty[i][0]
+            nodes[i]["certainty"][1] = soinn_certainty[i][1]
+            nodes[i]["certainty"][2] = soinn_certainty[i][2]
+            tmpnormal = nodes[i]["certainty"][0]
+            tmpabnormal = nodes[i]["certainty"][1]
+            if type==1:
+                if tmpnormal!=0 and tmpabnormal!=0:
+                    # [a,b,0]
+                    if tmpabnormal>0.5:
+                        nodes[i]["type"] = "abnormal"
+                    else:
+                        nodes[i]["type"] = "normal"
+                else:
+                    if tmpnormal>normalthre:
+                        # [a,0,c]
+                        nodes[i]["type"] = "normal"
+                    elif tmpabnormal>abnormalthre:
+                        # [0,b,c]
+                        nodes[i]["type"] = "abnormal"
+                    else:
+                        nodes[i]["type"] = "uncertain"
+            else:
+                if (tmpnormal < normalthre and nodes[i]["certainty"][2] != 0):
+                    tmpnormal = 0
+                if (tmpabnormal < abnormalthre and nodes[i]["certainty"][2] != 0):
+                    tmpabnormal = 0
+                if tmpnormal == 0 and tmpabnormal == 0:
+                    nodes[i]["type"] = "uncertain"
+                elif tmpnormal > tmpabnormal:
+                    nodes[i]["type"] = "normal"
+                else:
+                    nodes[i]["type"] = "abnormal"
 
+        if totaldis<0.01:
+            break
+    #更新timematchnode
+    tmpresult=[]
+    for i in range(len(timematchnode)):
+        tmpresult.append(0)
+        for j in range(len(timematchnode[i])):
+            tmpid= int(timematchnode[i][j].split("_")[1])
+            tmptype=nodes[tmpid]["type"]
+            timematchnode[i][j]=tmptype+"_"+str(tmpid)
+            if tmptype=="abnormal":
+                tmpresult[len(tmpresult)-1]=1
+    global timematchnode1
+    timematchnode1 = np.array(timematchnode)
+    #统计检测率
+    totalnum=min(len(timelabels),len(tmpresult))
+    normalnum=0
+    tpnum=0#异常样本标记为异常的次数
+    fpnum=0#正常样本误判为异常的次数
+    for i in range(totalnum):
+        if timelabels[i]==0:
+            normalnum=normalnum+1
+            if tmpresult[i]==1:
+                fpnum=fpnum+1
+        else:
+            if tmpresult[i]==1:
+                tpnum=tpnum+1
+    print("totalnum",totalnum,"normalnum",normalnum,"tpnum",tpnum,"fpnum",fpnum)
+    evt_unpacked = {'nodes': nodes}
+    evt = json.dumps(evt_unpacked)
+    self.write(evt)
+
+#======================matrix=============================
+def getmatrix(selectedid):
+    timearr = []
+    nodearr = [nodes[selectedid]]
+
+    # 查找含有选中节点的对应时间
+    for i in range(len(timematchnode)):
+        for j in range(len(timematchnode[i])):
+            tmpid = int(timematchnode[i][j].split("_")[1])
+            if tmpid == selectedid:
+                timearr.append(i)
+    # 查找这些时间对应的其他节点
+    for i in range(len(timearr)):
+        tmparr = timematchnode[timearr[i]]
+        for j in range(len(tmparr)):
+            tmpid = int(tmparr[j].split("_")[1])
+            if tmpid != selectedid:
+                existflag = 0
+                for k in range(len(nodearr)):
+                    if nodearr[k]["id"] == tmpid:
+                        existflag = 1
+                        break
+                if existflag == 0:
+                    nodearr.append(nodes[tmpid])
+    # 生成certainty矩阵
+    matrix_certainty = np.zeros((len(nodearr), len(timearr)))
+    # 遍历求certainty
+    for i in range(len(timearr)):
+        tmpnodesind = []
+        for j in range(len(nodearr)):
+            tmpstr = nodearr[j]["type"] + "_" + str(nodearr[j]["id"])
+            if tmpstr in timematchnode[timearr[i]]:
+                tmpnodesind.append(j)
+        if len(tmpnodesind) == 1:
+            tmpdis = LA.norm(nodearr[tmpnodesind[0]]["features_all"] - exist_feature[timearr[i]])
+            tmpthre = nodearr[tmpnodesind[0]]["threshold"]
+            matrix_certainty[tmpnodesind[0]][i] = tmpthre / float(tmpthre + tmpdis)
+        else:
+            tmpdis1 = LA.norm(nodearr[tmpnodesind[0]]["features_all"] - exist_feature[timearr[i]])
+            tmpdis2 = LA.norm(nodearr[tmpnodesind[1]]["features_all"] - exist_feature[timearr[i]])
+            matrix_certainty[tmpnodesind[0]][i] = tmpdis2 / float(tmpdis1 + tmpdis2)
+            matrix_certainty[tmpnodesind[1]][i] = tmpdis1 / float(tmpdis1 + tmpdis2)
+    return nodearr,timearr,matrix_certainty
+
+class updateMatrix_node(tornado.web.RequestHandler):
+  def get(self):
+    print("updateMatrix_node")
+    selectedid = int(json.loads(self.get_argument('nodeid')))
+    if selectedid==-1:
+        mincertainty=1
+        #找certainty最小的节点
+        for i in range(len(nodes)):
+            if nodes[i]["type"]=="normal" and nodes[i]["certainty"][0]<mincertainty:
+                mincertainty=nodes[i]["certainty"][0]
+                selectedid=i
+            elif nodes[i]["type"]=="abnormal" and nodes[i]["certainty"][1]<mincertainty:
+                mincertainty=nodes[i]["certainty"][1]
+                selectedid=i
+        if selectedid==-1:
+            selectedid=0
+
+    nodearr, timearr, matrix_certainty=getmatrix(selectedid)
+    print("updateMatrix_node end")
+    evt_unpacked = {'nodes': nodearr,'times':timearr,'matrix':matrix_certainty.tolist()}
+    evt = json.dumps(evt_unpacked)
+    self.write(evt)
+
+class updateMatrix_time(tornado.web.RequestHandler):
+  def get(self):
+    print("updateMatrix_time")
+    timeind = int(json.loads(self.get_argument('timeind')))
+    nodesid=[]
+    for i in range(len(timematchnode[timeind])):
+        tmpid = int(timematchnode[timeind][i].split("_")[1])
+        nodesid.append(tmpid)
+    selectedid=nodesid[0]
+
+    nodearr, timearr, matrix_certainty=getmatrix(selectedid)
+    print("updateMatrix_time end")
+    evt_unpacked = {'nodes': nodearr,'times':timearr,'matrix':matrix_certainty.tolist()}
+    evt = json.dumps(evt_unpacked)
+    self.write(evt)
+
+class labelTime(tornado.web.RequestHandler):
+  def get(self):
+    print("labelTime")
+    labeledtimeind = int(json.loads(self.get_argument('labeledtimeind')))
+    labeledtype = json.loads(self.get_argument('labeledtype'))
+    #soinn加入新的节点
+    global soinn_node, soinn_connection, soinn_wincnt, soinn_threshold, soinn_age
+    soinn_node=soinn_node.tolist()
+    soinn_node, soinn_connection, soinn_wincnt, soinn_threshold, soinn_age, tmpminind, tmpminind2=SOINN_addnode(exist_feature[labeledtimeind], soinn_node, soinn_connection, soinn_wincnt, soinn_threshold, soinn_age)
+    soinn_node=np.array(soinn_node)
+    #更新timematchnode和wincnt
+    tmpnewind = len(soinn_node) - 1
+    for i in range(len(timematchnode)):
+        for j in range(len(timematchnode[i])):
+            tmpid=int(timematchnode[i][j].split("_")[1])
+            if tmpid==tmpminind or tmpid==tmpminind2:
+                tmporigindis = LA.norm(exist_feature[i] - soinn_node[tmpid])
+                newdis=LA.norm(exist_feature[i] - soinn_node[tmpnewind])
+                if newdis<tmporigindis:
+                    timematchnode[i][j]=labeledtype+"_"+str(tmpnewind)
+                    soinn_wincnt[tmpid]=soinn_wincnt[tmpid]-1
+                    soinn_wincnt[tmpnewind]=soinn_wincnt[tmpnewind]+1
+    #重新映射
+    soinn_node_embedded = TSNE(n_components=2, learning_rate=380).fit_transform(soinn_node)
+    #更新nodes links
+    global nodes,links
+    #加入新节点
+    nodes.append(
+        {"id": tmpnewind, "wincnt": soinn_wincnt[tmpnewind], "features_all": exist_feature[labeledtimeind].tolist(), "feature": [],
+         "threshold": soinn_threshold[tmpnewind], "type": labeledtype, "certainty": [0, 0, 0], "labeled": 1})
+    if labeledtype=="normal":
+        nodes[tmpnewind]["certainty"]=[1,0,0]
+    else:
+        nodes[tmpnewind]["certainty"] = [0,1,0]
+    #删除多余的边
+    #print(len(links))
+    for i in range(len(links)):
+        #print(i)
+        if (links[i]["source"]==tmpminind and links[i]["target"]==tmpminind2) or (links[i]["source"]==tmpminind2 and links[i]["target"]==tmpminind):
+            links = links[:i] + links[i+ 1:]
+            break
+    #加入边
+    links.append({"source": tmpminind, "target": tmpnewind, "cnt": 1, "age": 1})
+    links.append({"source": tmpminind2, "target": tmpnewind, "cnt": 1, "age": 1})
+    #更新nodes
+    for i in range(len(nodes)):
+        nodes[i]["feature"]=soinn_node_embedded[i].tolist()
+    #更新links
+    for i in range(len(links)):
+        links[i]["cnt"]=soinn_connection[links[i]["source"]][links[i]["target"]]
+        links[i]["age"]=soinn_age[links[i]["source"]][links[i]["target"]]
+    # 更新其他矩阵
+    global soinn_certainty, soinn_distance
+    soinn_certainty = np.row_stack((soinn_certainty, [0, 0, 0]))
+    soinn_distance = np.row_stack((soinn_distance, np.zeros(soinn_distance.shape[1])))
+    soinn_distance = np.column_stack((soinn_distance, np.zeros(soinn_distance.shape[0])))
+    for i in range(len(soinn_node)):
+        soinn_distance[tmpminind][i] = LA.norm(soinn_node[tmpminind] - soinn_node[i])
+        soinn_distance[i][tmpminind] = soinn_distance[tmpminind][i]
+        soinn_distance[tmpminind2][i] = LA.norm(soinn_node[tmpminind2] - soinn_node[i])
+        soinn_distance[i][tmpminind2] = soinn_distance[tmpminind2][i]
+        soinn_distance[tmpnewind][i] = LA.norm(soinn_node[tmpnewind] - soinn_node[i])
+        soinn_distance[i][tmpnewind] = soinn_distance[tmpnewind][i]
+    print("labelTime end")
+    evt_unpacked = {}
+    evt = json.dumps(evt_unpacked)
+    self.write(evt)
 #======================statistic view=============================
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, decimal.Decimal):
-            return float(o)
-        super(DecimalEncoder, self).default(o)
 
 class statisticdata(tornado.web.RequestHandler):
   def get(self):
@@ -741,6 +1135,10 @@ class Application(tornado.web.Application):
       (r'/init_soinn', init_soinn),
       (r'/filterSoinnNode', filterSoinnNode),
       (r'/modifySoinn', modifySoinn),
+      (r'/labelSoinn', labelSoinn),
+      (r'/updateMatrix_node', updateMatrix_node),
+      (r'/updateMatrix_time', updateMatrix_time),
+      (r'/labelTime', labelTime),
       (r'/statisticdata', statisticdata),
       (r'/forcedata', forcedata),
       (r'/getentropy', getentropy),

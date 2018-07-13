@@ -29,8 +29,8 @@ function Line(Observer){
 	});
 	
 	var $brtDiv=$("#top-left-div");
-    width=$brtDiv.width();
-    height=$brtDiv.height();
+    var width=$brtDiv.width();
+    var height=$brtDiv.height();
 	
 	var leftw=10;
 	var rightw=30;

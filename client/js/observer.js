@@ -1,6 +1,7 @@
 function Observer() {
     var observer = {};
     var viewList = [];
+	observer.mintime=1364774400;
 	observer.starttime=1365078600;//1365325500;//1365078600;
 	observer.ip2int=function(ip){
 		var num = 0;
@@ -49,4 +50,4 @@ var soinn = Soinn(obs);
 var statistic = Statistic(obs);
 var netforce = Netforce(obs);
 var line = Line(obs);
-
+var matrix = Matrix(obs);
