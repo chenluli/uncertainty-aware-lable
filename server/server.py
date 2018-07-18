@@ -373,14 +373,18 @@ def updateMembershipValue(k,cluster_id,cluster_type):
             distances.append(soinn_distance[i][cluster_id[j]])
         #加入在阈值范围内的节点作为额外的center
         #更新type distances
+
         for j in range(len(soinn_node)):
             if soinn_distance[i][j]<soinn_threshold[i] and j!=i and not(j in cluster_id):
+                #if i==71:print(nodes[j])
                 cluster_type_tmp.append(nodes[j]["type"])
                 tmptypeind=np.where(typearr == nodes[j]["type"])[0][0]
-                tmpdis=soinn_distance[i][j]/soinn_certainty[j][tmptypeind]
+                if(soinn_certainty[j][tmptypeind]==0):
+                    print(nodes[j],tmptypeind)
+                tmpdis=soinn_distance[i][j]/float(soinn_certainty[j][tmptypeind])
                 distances.append(tmpdis)
-            if len(cluster_type_tmp)-len(cluster_type)>3:
-                break
+            #if len(cluster_type_tmp)-len(cluster_type)>3:
+            #    break
 
         #如果阈值范围内没有其他节点，加入最近的节点
         if(len(cluster_type_tmp)==len(cluster_type)):
@@ -392,20 +396,21 @@ def updateMembershipValue(k,cluster_id,cluster_type):
                     nearestnodeid=j
             cluster_type_tmp.append(nodes[nearestnodeid]["type"])
             tmptypeind = np.where(typearr == nodes[nearestnodeid]["type"])[0][0]
-            tmpdis = soinn_distance[i][nearestnodeid]/soinn_certainty[nearestnodeid][tmptypeind]
+            tmpdis = soinn_distance[i][nearestnodeid]/float(soinn_certainty[nearestnodeid][tmptypeind])
             distances.append(tmpdis)
+
         tmpcertainty=[0,0,0]
         #统计隶属度
 
         kk = len(cluster_type_tmp)
         for j in range(kk):
-            den = sum([math.pow(float(distances[j]/distances[c]), 2) for c in range(kk)])
+            den = sum([math.pow(distances[j]/float(distances[c]), 2) for c in range(kk)])
             tmptype=cluster_type_tmp[j]
             tmptypeind = np.where(typearr == tmptype)[0][0]
-            tmpcertainty[tmptypeind] = tmpcertainty[tmptypeind]+float(1/den)
+            tmpcertainty[tmptypeind] = tmpcertainty[tmptypeind]+1/float(den)
         tmpsum=np.sum(tmpcertainty)
         for j in range(len(tmpcertainty)):
-            soinn_certainty_new[i][j]=tmpcertainty[j]/tmpsum
+            soinn_certainty_new[i][j]=tmpcertainty[j]/float(tmpsum)
     totaldis=0
     for i in range(len(soinn_certainty_new)):
         for j in range(3):
@@ -551,6 +556,7 @@ class labelSoinn(tornado.web.RequestHandler):
         soinn_certainty[cluster_id[i]][tmptypeind] = 1
     #聚类中心阈值内的点归为和聚类中心一类
     #如果一个点同时在多种聚类中心阈值内，根据距离求概率
+
     for i in range(len(soinn_distance)):
         if i in cluster_id:
             continue
@@ -570,24 +576,35 @@ class labelSoinn(tornado.web.RequestHandler):
         if normal_min_ind==-1 and abnormal_min_ind==-1:
             continue
         elif normal_min_ind!=-1 and abnormal_min_ind!=-1:
-            tmpnormalperc=normal_min_dis/(normal_min_dis+abnormal_min_dis)
+            tmpnormalperc=abnormal_min_dis/float(normal_min_dis+abnormal_min_dis)
             tmpabnormalperc=1-tmpnormalperc
             nodes[i]["certainty"] = [tmpnormalperc, tmpabnormalperc, 0]
             soinn_certainty[i]= [tmpnormalperc, tmpabnormalperc, 0]
-            if tmpnormalperc>tmpabnormalperc :
+            #if tmpnormalperc>tmpabnormalperc and tmpnormalperc>normalthre:
+            if tmpnormalperc>normalthre:
                 nodes[i]["type"] = "normal"
-            elif tmpabnormalperc>tmpnormalperc:
+            #elif tmpabnormalperc>tmpnormalperc and tmpabnormalperc>abnormalthre:
+            elif tmpabnormalperc>abnormalthre:
                 nodes[i]["type"] = "abnormal"
             else:
                 nodes[i]["type"] = "uncertain"
         elif normal_min_ind!=-1:
-            nodes[i]["type"] = "normal"
-            nodes[i]["certainty"] = [1, 0, 0]
-            soinn_certainty[i] = [1, 0, 0]
+            tmpnormalperc = 1 - normal_min_dis / float(soinn_threshold[normal_min_ind])
+            if tmpnormalperc>normalthre:
+                nodes[i]["type"] = "normal"
+            else:
+                nodes[i]["type"] = "uncertain"
+            nodes[i]["certainty"] = [tmpnormalperc, 0, 1-tmpnormalperc]
+            soinn_certainty[i] = [tmpnormalperc, 0, 1-tmpnormalperc]
         else:
-            nodes[i]["type"] = "abnormal"
-            nodes[i]["certainty"] = [0, 1, 0]
-            soinn_certainty[i] = [0, 1, 0]
+            tmpabnormalperc = 1 - abnormal_min_dis / float(soinn_threshold[abnormal_min_ind])
+            if tmpabnormalperc>abnormalthre:
+                nodes[i]["type"] = "abnormal"
+            else:
+                nodes[i]["type"] = "uncertain"
+            nodes[i]["certainty"] = [0, tmpabnormalperc, 1-tmpabnormalperc]
+            soinn_certainty[i] = [0, tmpabnormalperc, 1-tmpabnormalperc]
+
     #最多迭代10次
     for i in range(10):
         # 求解隶属矩阵
@@ -630,6 +647,13 @@ class labelSoinn(tornado.web.RequestHandler):
                     else:
                         nodes[i]["type"] = "uncertain"
             else:
+                if (tmpnormal > normalthre):
+                    nodes[i]["type"] = "normal"
+                elif (tmpabnormal > abnormalthre):
+                    nodes[i]["type"] = "abnormal"
+                else:
+                    nodes[i]["type"] = "uncertain"
+                '''
                 if (tmpnormal < normalthre and nodes[i]["certainty"][2] != 0):
                     tmpnormal = 0
                 if (tmpabnormal < abnormalthre and nodes[i]["certainty"][2] != 0):
@@ -640,6 +664,8 @@ class labelSoinn(tornado.web.RequestHandler):
                     nodes[i]["type"] = "normal"
                 else:
                     nodes[i]["type"] = "abnormal"
+                '''
+
 
         if totaldis<0.01:
             break

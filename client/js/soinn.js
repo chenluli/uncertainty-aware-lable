@@ -64,10 +64,16 @@
 	var normalnum=0;
 	var abnormalnum=0;
 	
-	var normalthre=0.7;
-	var abnormalthre=0.5;
-	
-	
+	var normalthre=0.4;
+	var abnormalthre=0.6;
+	/*
+	var randomarr=[];
+	for(var i=0;i<65;){
+		var tmpnum=parseInt(Math.random()*284, 10);
+		if(_.indexOf(randomarr,tmpnum)<0){randomarr.push(tmpnum);i++;}
+	}
+	console.log(randomarr);
+	*/
 	function drawinfo(){
 		//================nodes information================	
 		//node types (uncertain normal abnormal)
@@ -202,9 +208,10 @@
 		var circles=soinn.nodedom.selectAll("circle").data(soinn.nodes)
 			.enter().append("circle")//.attr("class","soinn_nodes")
 			.attr("fill", function(d){
-				if (d.type=="uncertain"){return "#c2c2c2";}
-				if (d.type=="normal"){return nodecolor_normal(d["certainty"][0]);}
-				if (d.type=="abnormal"){return nodecolor_abnormal(d["certainty"][1]);}
+				//if (d.type=="uncertain"){return "#c2c2c2";}
+				if(d["certainty"][2]==1){return "#c2c2c2";}
+				if (d.type=="normal" || (d["certainty"][0]>d["certainty"][1])){return nodecolor_normal(d["certainty"][0]);}
+				if (d.type=="abnormal" || (d["certainty"][1]>d["certainty"][0])){return nodecolor_abnormal(d["certainty"][1]);}
 			}).on("mousedown",function(d){
 				//console.log(d3.event);
 				if(d3.event.button==0){
@@ -227,6 +234,7 @@
 				}
 			})
 			.attr("stroke",function(d,i){
+				//if(_.indexOf(randomarr,d.id)>=0){return "green";}
 				if(_.indexOf([4,17,21,71,72,73,74,75,76,77,78,79,80,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181],d.id)>=0){
 					return "red";
 				}else{return "white";}
