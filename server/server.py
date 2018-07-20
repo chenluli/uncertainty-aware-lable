@@ -532,6 +532,7 @@ class modifySoinn(tornado.web.RequestHandler):
     evt = json.dumps(evt_unpacked)
     self.write(evt)
 
+
 class labelSoinn(tornado.web.RequestHandler):
   def get(self):
     type=0 #type=0 uncertain也有概率; type=1 uncertain没有概率
@@ -699,6 +700,17 @@ class labelSoinn(tornado.web.RequestHandler):
     evt = json.dumps(evt_unpacked)
     self.write(evt)
 
+class resetLayout(tornado.web.RequestHandler):
+  def get(self):
+    # 重新映射
+    global soinn_node_embedded,nodes
+    soinn_node_embedded = TSNE(n_components=2, learning_rate=380).fit_transform(soinn_node)
+    # 更新nodes
+    for i in range(len(nodes)):
+        nodes[i]["feature"] = soinn_node_embedded[i].tolist()
+    evt_unpacked = {'nodes': nodes,'links':links,'distance':soinn_distance.tolist()}
+    evt = json.dumps(evt_unpacked)
+    self.write(evt)
 #======================matrix=============================
 def getmatrix(selectedid):
     timearr = []
@@ -1162,6 +1174,7 @@ class Application(tornado.web.Application):
       (r'/filterSoinnNode', filterSoinnNode),
       (r'/modifySoinn', modifySoinn),
       (r'/labelSoinn', labelSoinn),
+      (r'/resetLayout', resetLayout),
       (r'/updateMatrix_node', updateMatrix_node),
       (r'/updateMatrix_time', updateMatrix_time),
       (r'/labelTime', labelTime),

@@ -559,7 +559,32 @@
 			},
 		});
 	}
-	
+	soinn.resetlayout=function(){
+		$.ajax({
+			type: 'GET',
+			url: 'resetLayout',
+			//data: obj,
+			dataType: 'json',
+			success: function(evt_data) {
+				soinn.nodes=evt_data.nodes;
+				soinn.links=evt_data.links;
+				soinn.distance=evt_data.distance;
+				soinn.labelednodes=[];
+				totalnum=soinn.nodes.length;
+				for(var i=0;i<totalnum;i++){
+					if(soinn.nodes[i]["labeled"]==1){
+						soinn.labelednodes.push({"id":i,"type":soinn.nodes[i]["type"]});
+					}
+				}
+				updateinfo();
+				setscale();
+				drawgraph();
+			},
+			error: function(jqXHR) {
+				console.log('post error!!', jqXHR);
+			},
+		});
+	}
 	soinn.initgraph=function(){
 		$.ajax({
 			type: 'GET',

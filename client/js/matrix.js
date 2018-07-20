@@ -8,11 +8,11 @@ function Matrix(Observer){
     var height=$brtDiv.height();
 	var height_bak=height;
 	var lefttextw=20;
-	var noderadius=8;
+	var noderadius=7;
 	var toptexth=20;
 	var timesliceh=20;
 	var timeslicew=10;
-	var matrixw=20;var matrixh=25;
+	var matrixw=20;var matrixh=20;
 	var margin = {top: toptexth+timesliceh+15, right: 20, bottom: 20, left: lefttextw+noderadius*2+15};
 	
 	var svg=d3.select("#matrix")
@@ -38,13 +38,14 @@ function Matrix(Observer){
 	
 	function drawmatrix(){
 		//======================adjust w h===========================
-		var tmpw=(width_bak-margin.left-margin.right)/matrix.timearr.length;
-		if(tmpw>20){matrixw=tmpw;width=width_bak;}
-		else{matrixw=20;width=margin.left+matrixw*matrix.timearr.length+margin.right;}
-		
 		var tmph=(height_bak-margin.top-margin.bottom)/matrix.nodesarr.length;
-		if(tmph>25){matrixh=tmph;height=height_bak;}
-		else{matrixh=25;height=margin.top+margin.bottom+matrixh*matrix.nodesarr.length;}
+		if(tmph>20){matrixh=tmph;height=height_bak;}
+		else{tmph=20;matrixh=20;height=margin.top+margin.bottom+matrixh*matrix.nodesarr.length;}
+		
+		matrixw=tmph;width=margin.left+matrixw*matrix.timearr.length+margin.right;//保持正方形
+		//var tmpw=(width_bak-margin.left-margin.right)/matrix.timearr.length;
+		//if(tmpw>20){matrixw=tmpw;width=width_bak;}
+		//else{matrixw=20;width=margin.left+matrixw*matrix.timearr.length+margin.right;}
 		
 		svg.attr("width", width).attr("height", height);
 		//======================draw nodes===========================
@@ -52,9 +53,12 @@ function Matrix(Observer){
 		var circles=matrix.nodedom.selectAll("circle").data(matrix.nodesarr)
 			.enter().append("circle")
 			.attr("fill", function(d){
-				if (d.type=="uncertain"){return "#c2c2c2";}
-				if (d.type=="normal"){return nodecolor_normal(d["certainty"][0]);}
-				if (d.type=="abnormal"){return nodecolor_abnormal(d["certainty"][1]);}
+				//if (d.type=="uncertain"){return "#c2c2c2";}
+				//if (d.type=="normal"){return nodecolor_normal(d["certainty"][0]);}
+				//if (d.type=="abnormal"){return nodecolor_abnormal(d["certainty"][1]);}
+				if(d["certainty"][2]==1){return "#c2c2c2";}
+				if (d.type=="normal" || (d["certainty"][0]>d["certainty"][1])){return nodecolor_normal(d["certainty"][0]);}
+				if (d.type=="abnormal" || (d["certainty"][1]>d["certainty"][0])){return nodecolor_abnormal(d["certainty"][1]);}
 			}).attr("stroke","white")
 			.attr("stroke-width",function(d){if(d.id==matrix.clickedTlNodeID){return 3;}else{return 1;}})
 			.attr("r", noderadius)
@@ -130,7 +134,15 @@ function Matrix(Observer){
 					$(this).css("stroke-width",3);
 				}
 			});
-		rects.append("title").text(function(d) {return d*60+Observer.mintime; });	
+		rects.append("title").text(function(d) {
+			var daydiffer=Math.floor((d*60)/(24*3600))
+			var curTime=d*60+Observer.mintime; 
+			var tmpDate=new Date(curTime*1000-8*60*60*1000);
+			var dayselected=daydiffer;
+			var hourselected=tmpDate.getHours();
+			var minuteselected=tmpDate.getMinutes();
+			return "4."+(dayselected+1)+" "+hourselected+":"+minuteselected; 
+		});	
 		
 		//==================timeslices right cllick=======================
 		$.contextMenu({
@@ -166,9 +178,13 @@ function Matrix(Observer){
 				.attr("fill", function(d,i){
 					if(d==0){return "black";}
 					var tmptype=matrix.nodesarr[k]["type"];
-					if (tmptype=="uncertain"){return nodecolor_uncertain(d);}
-					if (tmptype=="normal"){return nodecolor_normal(d);}
-					if (tmptype=="abnormal"){return nodecolor_abnormal(d);}
+					var tmpcertainty=matrix.nodesarr[k]["certainty"];
+					//if (tmptype=="uncertain"){return nodecolor_uncertain(d);}
+					//if (tmptype=="normal"){return nodecolor_normal(d);}
+					//if (tmptype=="abnormal"){return nodecolor_abnormal(d);}
+					if(tmpcertainty[2]==1){return "#c2c2c2";}
+					if (tmptype=="normal" || (tmpcertainty[0]>tmpcertainty[1])){return nodecolor_normal(d);}
+					if (tmptype=="abnormal" || (tmpcertainty[1]>tmpcertainty[0])){return nodecolor_abnormal(d);}
 				}).attr("stroke","white")
 				.attr("stroke-width",function(d){if(d==matrix.clickedTlTime){return 3;}else{return 1;}})
 				.attr("rx",2).attr("ry",2)
