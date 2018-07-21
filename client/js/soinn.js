@@ -50,6 +50,9 @@
 	soinn.labelednodes=[];
 	soinn.nodedom_label = svg.append("g").attr("class", "nodes_labeled");
 	
+	soinn.nodehistoryrects = svg.append("g").attr("class", "nodehistoryrects");
+	soinn.nodeaffects = svg.append("g").attr("class", "nodeaffects");
+	
 	soinn.clickedTlNodeID=-1;//点击的soinn节点
 	soinn.lassoNodeID=-1;//圈选的soinn节点
 	soinn.hightlightNodeID=-1;//高亮的soinn节点
@@ -74,6 +77,9 @@
 	}
 	console.log(randomarr);
 	*/
+	
+	
+	
 	function drawinfo(){
 		//================nodes information================	
 		//node types (uncertain normal abnormal)
@@ -200,13 +206,16 @@
 		y_scale = d3.scaleLinear().range([padding,height-padding]).domain([featureymin,featureymax]);
 		
 	}
+	var historytimer;
+	
+	
 	
 	function drawgraph(){
 		
 		//=================draw nodes================	
 		soinn.nodedom.selectAll("circle").remove();
 		var circles=soinn.nodedom.selectAll("circle").data(soinn.nodes)
-			.enter().append("circle")//.attr("class","soinn_nodes")
+			.enter().append("circle").attr("id",function(d,i){return "nodes_"+d.id;})
 			.attr("fill", function(d){
 				//if (d.type=="uncertain"){return "#c2c2c2";}
 				if(d["certainty"][2]==1){return "#c2c2c2";}
@@ -217,14 +226,58 @@
 				if(d3.event.button==0){
 					//左击
 					console.log(d);
+					soinn.nodeaffects.selectAll(".arc").remove();
+					soinn.nodehistoryrects.selectAll("rect").remove();
 					if(d.id==soinn.clickedTlNodeID){
 						Observer.fireEvent("selectSoinnNode",-1,soinn);
 						resetHightlight();
+						
 					}else{
 						Observer.fireEvent("selectSoinnNode",[d.type,d.id],soinn);
 						soinn.clickedTlNodeID=d.id;
 						$(".soinn_svg .nodes circle").css("stroke-width",1);
 						$(this).css("stroke-width",3);
+						
+						//获取影响节点
+						var obj={};
+						obj.nodeid = JSON.stringify(d.id);
+						obj.labelednodes = JSON.stringify(soinn.labelednodes);
+						console.log(obj);
+						$.ajax({
+							type: 'GET',
+							url: 'nodeAffect',
+							data: obj,
+							dataType: 'json',
+							success: function(evt_data) {
+								console.log(evt_data);
+								if(evt_data.affectnodes.length>0){
+									//add pie
+									drawaffectpie(d.id,evt_data.affectnodes,d3.select("#nodes_"+d.id).attr("cx"),d3.select("#nodes_"+d.id).attr("cy"),d3.select("#nodes_"+d.id).attr("r"));
+								}
+							},
+							error: function(jqXHR) {
+								console.log('post error!!', jqXHR);
+							},
+						});
+						if(soinn.labelednodes.length>0){
+							console.log("soinn node history "+d.id);
+							//console.log(d3.select("#nodes_"+d.id).attr("cx"));
+							var obj={};
+							obj.nodeid = JSON.stringify(d.id);
+							$.ajax({
+								type: 'GET',
+								url: 'getHistory',
+								data: obj,
+								dataType: 'json',
+								success: function(evt_data) {
+									console.log(evt_data);
+									drawhistoryrects(d.id,evt_data["history"],d3.select("#nodes_"+d.id).attr("cx"),d3.select("#nodes_"+d.id).attr("cy"),d3.select("#nodes_"+d.id).attr("r"));
+								},
+								error: function(jqXHR) {
+									console.log('post error!!', jqXHR);
+								},
+							});
+						}
 					}
 				}else{
 					//右击
@@ -235,8 +288,9 @@
 			})
 			.attr("stroke",function(d,i){
 				//if(_.indexOf(randomarr,d.id)>=0){return "green";}
-				if(_.indexOf([4,17,21,71,72,73,74,75,76,77,78,79,80,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181],d.id)>=0){
-					return "red";
+				//if(_.indexOf([4,17,21,71,72,73,74,75,76,77,78,79,80,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181],d.id)>=0){
+				if(_.indexOf(soinn.changednodes,d.id)>=0){
+					return "#EE3B3B";
 				}else{return "white";}
 			})
 			//.attr("id",function(d,i){return "soinnnode_"+d.id;})
@@ -298,187 +352,84 @@
 			}
 		});
 	}
-	function drawgraph_force(){
-		//=============生成全连接link===========
-		var links_all=[];
-		var maxdis=0;var mindis=10000;
-		for(var i=0;i<soinn.nodes.length;i++){
-			for(var j=i+1;j<soinn.nodes.length;j++){
-				if(soinn.distance[i][j]>2){continue;}
-				links_all.push({"source":i,"target":j,"cnt":0,"dis":soinn.distance[i][j]});
-				if(soinn.distance[i][j]>maxdis){maxdis=soinn.distance[i][j];}
-				if(soinn.distance[i][j]<mindis){mindis=soinn.distance[i][j];}
+	function drawaffectpie(clickedid,affectnode,x,y,r){
+		x=parseInt(x);
+		y=parseInt(y);
+		r=parseInt(r);
+		var sortedaffected=_.sortBy(affectnode, function(d){ return -d[1]; });
+		var tmptotal=0;
+		var newaffected=[];
+		for(var i=0;i<5;i++){
+			newaffected.push(sortedaffected[i]);
+			tmptotal=tmptotal+sortedaffected[i][1];
+			if(tmptotal>0.9){
+				break;
 			}
 		}
-		for(var i=0;i<soinn.links.length;i++){
-			for(var j=0;j<links_all.length;j++){
-				if(links_all[j]["source"]==soinn.links[i]["source"] && links_all[j]["target"]==soinn.links[i]["target"]){
-					links_all[j]["cnt"]=soinn.links[i]["cnt"];
-					break;
-				}
-			}
-		}
-		soinn.links_all=links_all;
-		console.log("dis min,max",mindis,maxdis);
-		//==============scale=================
-		var linkcnt=_.pluck(soinn.links,"cnt");
-		var nodewinnum=_.pluck(soinn.nodes,"wincnt");
-		var nodethre=_.pluck(soinn.nodes,"threshold");
-		var node_r_scale = d3.scaleSqrt().range([4,12]).domain([_.min(nodewinnum),_.max(nodewinnum)]);
-		var node_thre_scale = d3.scaleSqrt().range([6,15]).domain([0,_.max(nodethre)]);
-		var link_width_scale = d3.scaleLog().range([0.5,4]).domain([_.min(linkcnt),_.max(linkcnt)]);
-		var link_strength = d3.scaleLinear().range([0.6,1]).domain([mindis,maxdis]);
-		var link_dis = d3.scaleLinear().range([5,10]).domain([mindis,maxdis]);
+		console.log(affectnode);
+		console.log(sortedaffected);
+		console.log(newaffected);
 		
-		//=================Simulation================	
-		
-		var dis = 30;
-        var simulation = d3.forceSimulation()
-            .force("link", d3.forceLink().id(function(d) { return d.id; }).distance(function(d) {
-                if (maxdis == mindis) return dis;
-                else return dis  - (d.dis - mindis) / (maxdis - mindis) * (dis / 2);
-            }))
-            .force("charge", d3.forceManyBody())
-            .force("center", d3.forceCenter(width / 2, height / 2))
-            .force("x", d3.forceX(width / 2).strength(0.1))
-            .force("y", d3.forceY(height / 2).strength(0.1))
-			.on("tick", ticked).stop();
-		/*
-		var WHrate = Math.sqrt(width * height / 1200/ 400);
-		var simulation = d3.forceSimulation()
-					.force("link", d3.forceLink()
-						//.strength(function strength(d) {
-						//	return link_strength(d.dis);
-						//})
-						.distance(function(d,i){return link_dis(d.dis);}))
-					.force("charge", d3.forceManyBody().strength(-200 * WHrate/soinn.nodes.length*50))
-					.force("x", d3.forceX(width / 2))
-					.force("y", d3.forceY(height / 2))
-					.force("center", d3.forceCenter(width / 2, height / 2))
-					.on("tick", ticked).stop();
-		*/
-		//=================draw nodes================	
-		soinn.nodedom.selectAll("circle").remove();
-		var circles=soinn.nodedom.selectAll("circle").data(soinn.nodes)
-			.enter().append("circle")//.attr("class","soinn_nodes")
-			.attr("fill", function(d){
-				if (d.type=="uncertain"){return "#c2c2c2";}
-				if (d.type=="normal"){return d3.rgb("#6cb7f5");}
-				if (d.type=="abnormal"){return d3.rgb("#ffcc99");}
-			}).on("mousedown",function(d){
-				//console.log(d3.event);
-				if(d3.event.button==0){
-					//左击
-					console.log(d);
-					if(d.id==soinn.clickedTlNodeID){
-						Observer.fireEvent("selectSoinnNode",-1,soinn);
-						resetHightlight();
-					}else{
-						Observer.fireEvent("selectSoinnNode",[d.type,d.id],soinn);
-						soinn.clickedTlNodeID=d.id;
-						$(".soinn_svg .nodes circle").css("stroke-width",1);
-						$(this).css("stroke-width",3);
-						
-					}
-				}else{
-					//右击
-					soinn.lassoNodeID=d.id;
-					$(this).css("stroke-width",3);
-				}
-				
-			})
-			.call(d3.drag()
-                .on("start", dragstarted)
-                .on("drag", dragged)
-                .on("end", dragended))
-			.attr("r", function(d,i){return node_r_scale(d.wincnt);});
-		circles.append("title")
-			  .text(function(d) {return d.id+" threshold:"+d.threshold.toFixed(2)+" wincnt:"+d.wincnt; });	
-		
-		function dragstarted(d) {
-            if (!d3.event.active) simulation.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-        }
-		function dragged(d) {
-            d.fx = d3.event.x;
-            d.fy = d3.event.y;
-        }
+		var pie = d3.pie()
+			.sort(null)
+			.value(function(d) { return d[1]; });
 
-        function dragended(d) {
-            if (!d3.event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-        }
-		
-		//=================draw links================	
-		soinn.linkdom.selectAll("line").remove();
-		soinn.linkdom.selectAll("line").data(soinn.links_all.filter(function(d){return d.cnt>0;}))
-			.enter().append("line")
+		var path = d3.arc()
+			.outerRadius(r+17)
+			.innerRadius(r+8);
+			
+		soinn.nodeaffects.selectAll(".arc").data(pie(newaffected))
+			.enter().append("g").attr("class", "arc")
+			.attr("transform", "translate(" + x + "," + y + ")")
+			.append("path")
+			.attr("d", path)
+			.attr("fill", function(d) {return d3.select("#nodes_"+d.data[0]).attr("fill"); })
 			.attr("stroke","white")
-			.attr("stroke-width", function(d){
-				if(d.cnt==0){return 0;}
-				return link_width_scale(d.cnt);
-			}).on("click",function(d){console.log(d);});
-		//=================start simulation================
-		simulation.nodes(soinn.nodes);
-        simulation.force("link")
-            .links(soinn.links_all);
-		simulation.alpha(1).restart();
-		function ticked() {
-            soinn.linkdom.selectAll("line")
-                .attr("x1", function(d) { return d.source.x; })
-                .attr("y1", function(d) { return d.source.y; })
-                .attr("x2", function(d) { return d.target.x; })
-                .attr("y2", function(d) { return d.target.y; });
-
-            circles.attr("cx", function(d) { return d.x; })
-                .attr("cy", function(d) { return d.y; });
-        }
-		//=================right click nodes================	
-		$.contextMenu({
-            selector: ("#soinn svg .nodes circle"), 
-            callback: function(key, options) {
-				if(key=="normal"){
-					let obj = {};
-					//console.log(normal0ab1,soinn.lassoNodeID_normal,soinn.lassoNodeID_abnormal);
-					obj.type = JSON.stringify("normal");
-					obj.nodes = JSON.stringify(soinn.lassoNodeID);
-					console.log(obj);
-					$("#soinn_wait").show(function(){
-						var target= document.getElementById('soinn_wait');
-						spinner.spin(target);  
-					});
-					$.ajax({
-						type: 'GET',
-						url: 'modifySoinn',
-						data: obj,
-						dataType: 'json',
-						success: function(evt_data) {
-							console.log(evt_data);
-							//totalinit(evt_data);
-							$("#soinn_wait").hide();
-						},
-						error: function(jqXHR) {
-							console.log('post error!!', jqXHR);
-						},
-					});
-				}
-				resetHightlight();
-            },
-            items: {
-                "normal": {name: "Normal"},
-                "abnormal": {name: "Abnormal"},
-                "cancel": {name: "Cancel"}
-            }
-        });
-		svg.on("mouseup",function(){
-			if(event.target.nodeName=="svg"){
-				resetHightlight();
-				Observer.fireEvent("selectSoinnNode",-1,soinn);
-			}
-		});
-		
+			.attr("stroke-width", 3)
+			.on("mouseover",function(d){
+				//console.log(d.data);
+				soinn.nodedom.selectAll("circle").attr("opacity",0.2);
+				soinn.linkdom.selectAll("line").attr("opacity",0.2);
+				d3.select("#nodes_"+clickedid).attr("opacity",1);
+				d3.select("#nodes_"+d.data[0]).attr("opacity",1);
+			}).on("mouseout",function(){
+				soinn.nodedom.selectAll("circle").attr("opacity",1);
+				soinn.linkdom.selectAll("line").attr("opacity",1);
+			});
+	}
+	
+	function drawhistoryrects(clickedid,histdata,x,y,r){
+		//soinn.nodehistoryrects.selectAll("rect").remove();
+		//console.log(x,y,r);
+		x=parseInt(x);
+		y=parseInt(y);
+		r=parseInt(r);
+		var num=histdata.length;
+		var rectwh=10;
+		soinn.nodehistoryrects.selectAll("rect").data(histdata)
+			.enter().append("rect")
+			.attr("fill", function(d){
+				if(d[2]==1){return "#c2c2c2";}
+				if (d[0]>normalthre || (d[0]>d[1])){return nodecolor_normal(d[0]);}
+				if (d[1]>abnormalthre || (d[1]>d[0])){return nodecolor_abnormal(d[1]);}
+			})
+			.attr("x", function(d,i){
+				return x-rectwh*num/2+rectwh*i;
+			})
+			.attr("y", y-r-35)
+			.attr("width", rectwh).attr("height", rectwh)
+			.attr("stroke","white")
+			.attr("stroke-width", 1.5).attr("rx",1).attr("ry",1)
+			.on("mouseover",function(d,i){
+				//console.log(d.data);
+				soinn.nodedom.selectAll("circle").attr("opacity",0.2);
+				soinn.linkdom.selectAll("line").attr("opacity",0.2);
+				d3.select("#nodes_"+clickedid).attr("opacity",1);
+				d3.select("#nodes_"+soinn.labelednodes[i]["id"]).attr("opacity",1);
+			}).on("mouseout",function(){
+				soinn.nodedom.selectAll("circle").attr("opacity",1);
+				soinn.linkdom.selectAll("line").attr("opacity",1);
+			});
 	}
 	
 	function hlnodes(){
@@ -502,10 +453,12 @@
 		}
 		
 	}
-	
+
 	function labelnode(labeltype,nodeid){
 		//右击标注节点
 		if(nodeid!=-1){
+			soinn.labelednodes.push({"id":nodeid,"type":labeltype});
+			/*
 			if(soinn.labelednodes.length==0){
 				soinn.labelednodes.push({"id":nodeid,"type":labeltype});
 			}
@@ -521,11 +474,13 @@
 					soinn.labelednodes.push({"id":nodeid,"type":labeltype});
 				}
 			}
+			*/
 		}
 		
 		let obj = {};
 		//console.log(normal0ab1,soinn.lassoNodeID_normal,soinn.lassoNodeID_abnormal);
-		obj.labelednodes = JSON.stringify(soinn.labelednodes);
+		//obj.labelednodes = JSON.stringify(soinn.labelednodes);
+		obj.labelednodes = JSON.stringify({"id":nodeid,"type":labeltype});
 		obj.normalthre=JSON.stringify(normalthre);
 		obj.abnormalthre=JSON.stringify(abnormalthre);
 		console.log(obj);
@@ -542,7 +497,11 @@
 				Observer.fireEvent("re_initmatrix",nodeid,matrix);
 				console.log(evt_data);
 				//totalinit(evt_data);
+				//getchangednodes(soinn.nodes,evt_data.nodes);
 				soinn.nodes=evt_data.nodes;
+				soinn.changednodes=evt_data.changednodes;
+				var tmplabeledid=_.pluck(soinn.labelednodes,"id");
+				soinn.labelednodes=_.without(soinn.labelednodes, tmplabeledid);
 				updateinfo();
 				drawgraph();
 				/*
@@ -593,15 +552,21 @@
 			success: function(evt_data) {
 				soinn.nodes=evt_data.nodes;
 				soinn.links=evt_data.links;
+				soinn.changednodes=evt_data.changednodes;
 				//soinn.timematchnode=evt_data.match;
 				soinn.distance=evt_data.distance;
-				soinn.labelednodes=[];
 				totalnum=soinn.nodes.length;
+				/*
+				soinn.labelednodes=[];
 				for(var i=0;i<totalnum;i++){
 					if(soinn.nodes[i]["labeled"]==1){
 						soinn.labelednodes.push({"id":i,"type":soinn.nodes[i]["type"]});
 					}
 				}
+				*/
+				soinn.labelednodes=evt_data.labelednode;
+				var tmplabeledid=_.pluck(soinn.labelednodes,"id");
+				soinn.labelednodes=_.without(soinn.labelednodes, tmplabeledid);
 				console.log(evt_data);
 				drawinfo();
 				updateinfo();
@@ -626,6 +591,8 @@
 		$(".soinn_svg line").attr("opacity",1);
 		d3.selectAll(".soinn_info_type").attr("stroke-width",0);
 		d3.selectAll(".soinn_info_label").attr("stroke-width",0);
+		soinn.nodeaffects.selectAll(".arc").remove();
+		soinn.nodehistoryrects.selectAll("rect").remove();
 	}
 	
     soinn.onMessage = function(message, data, from) {

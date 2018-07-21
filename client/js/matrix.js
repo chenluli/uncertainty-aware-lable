@@ -8,21 +8,31 @@ function Matrix(Observer){
     var height=$brtDiv.height();
 	var height_bak=height;
 	var lefttextw=20;
-	var noderadius=7;
-	var toptexth=20;
-	var timesliceh=20;
-	var timeslicew=10;
-	var matrixw=20;var matrixh=20;
-	var margin = {top: toptexth+timesliceh+15, right: 20, bottom: 20, left: lefttextw+noderadius*2+15};
+	var noderadius=6;
+	var toptexth=10;
+	var timesliceh=15;
+	var timeslicew=8;
+	var matrixw=17;var matrixh=17;
+	var margin = {top: toptexth+timesliceh+9, right: 20, bottom: 20, left: lefttextw+noderadius*2+15};
 	
 	var svg=d3.select("#matrix")
 			.append("svg")
 			.attr("width", width)
 			.attr("height", height).attr("class","matrix_svg");
 	
+	var $brtDiv2=$("#matrix_hist");
+    var width2=$brtDiv2.width();
+    var height2=$brtDiv2.height();
+	var svg2=d3.select("#matrix_hist")
+			.append("svg")
+			.attr("width", width2)
+			.attr("height", height2);
+	
 	matrix.nodedom = svg.append("g").attr("class", "matrixnodes");
 	matrix.nodedom_label = svg.append("g").attr("class", "nodes_labeled");
 	matrix.timedom = svg.append("g").attr("class", "times");
+	matrix.timehistdom = svg2.append("g").attr("class", "timehist");
+	matrix.timehisthldom = svg2.append("g").attr("class", "timehisthl");
 	matrix.matrixdom = svg.append("g").attr("class", "matrix_matrix");
 	
 	var nodecolor_normal=d3.interpolate(d3.rgb("#223442"),d3.rgb("#6cb7f5"));
@@ -38,16 +48,26 @@ function Matrix(Observer){
 	
 	function drawmatrix(){
 		//======================adjust w h===========================
-		var tmph=(height_bak-margin.top-margin.bottom)/matrix.nodesarr.length;
-		if(tmph>20){matrixh=tmph;height=height_bak;}
-		else{tmph=20;matrixh=20;height=margin.top+margin.bottom+matrixh*matrix.nodesarr.length;}
-		
-		matrixw=tmph;width=margin.left+matrixw*matrix.timearr.length+margin.right;//保持正方形
-		//var tmpw=(width_bak-margin.left-margin.right)/matrix.timearr.length;
-		//if(tmpw>20){matrixw=tmpw;width=width_bak;}
-		//else{matrixw=20;width=margin.left+matrixw*matrix.timearr.length+margin.right;}
+		//var tmph=(height_bak-margin.top-margin.bottom)/matrix.nodesarr.length;
+		//if(tmph>17){matrixh=tmph;height=height_bak;}
+		//else{tmph=17;matrixh=17;height=margin.top+margin.bottom+matrixh*matrix.nodesarr.length;}
+		//matrixw=tmph;
+		width=margin.left+matrixw*matrix.timearr.length+margin.right;
 		
 		svg.attr("width", width).attr("height", height);
+		/*
+		var timehish=height-margin.top-matrixh*matrix.nodesarr.length;
+		if(timehish>30){timehish=30;}
+		var x_scale = d3.scaleTime().range([margin.left,margin.left+matrixw*matrix.timearr.length])
+			.domain([new Date(Observer.mintime*1000-8*60*60*1000),new Date((Observer.starttime)*1000-8*60*60*1000)]);
+		var histw=x_scale(new Date((Observer.mintime+60)*1000))-x_scale(new Date(Observer.mintime*1000));
+		if(histw<1){histw=1;}
+		*/
+		var timehish=height2-20-5;
+		var x_scale = d3.scaleTime().range([margin.left,width2-margin.right])
+			.domain([new Date(Observer.mintime*1000-8*60*60*1000),new Date((Observer.starttime)*1000-8*60*60*1000)]);
+		var histw=x_scale(new Date((Observer.mintime+60)*1000))-x_scale(new Date(Observer.mintime*1000));
+		if(histw<1){histw=1;}
 		//======================draw nodes===========================
 		matrix.nodedom.selectAll("circle").remove();
 		var circles=matrix.nodedom.selectAll("circle").data(matrix.nodesarr)
@@ -133,6 +153,18 @@ function Matrix(Observer){
 					$(".matrix_svg .times rect").attr("stroke-width",1);
 					$(this).css("stroke-width",3);
 				}
+			})
+			.on("mouseover",function(d,i){
+				matrix.timehisthldom.append("rect")
+					.attr("fill", "pink")
+					.attr("x", function(){
+						return x_scale(new Date((d*60+Observer.mintime)*1000-8*60*60*1000));
+					})
+					.attr("y", 5)
+					.attr("width", histw*3).attr("height", timehish)
+			}).on("mouseout",function(){
+				//console.log("k");
+				matrix.timehisthldom.selectAll("rect").remove();
 			});
 		rects.append("title").text(function(d) {
 			var daydiffer=Math.floor((d*60)/(24*3600))
@@ -169,6 +201,20 @@ function Matrix(Observer){
 				Observer.fireEvent("selectSoinnNode",-1,soinn);
 			}
 		});
+		//==================draw time histogram=======================
+		
+		matrix.timehistdom.selectAll("g").remove();
+		matrix.timehistdom.append("g").selectAll("rect").data(matrix.timearr)
+			.enter().append("rect")
+			.attr("fill", "white")
+			.attr("x", function(d,i){return x_scale(new Date((d*60+Observer.mintime)*1000-8*60*60*1000));})
+			.attr("y", 5)
+			.attr("width", histw).attr("height", timehish)
+		matrix.timehistdom.append("g")
+			.attr("class", "x axis")
+			.attr("transform", "translate(0," + (height2-20) + ")")
+			.call(d3.axisBottom(x_scale));
+		
 		//==================draw matrix=======================
 		matrix.matrixdom.selectAll("g").remove();
 		for(var k=0;k<matrix.certainmatrix.length;k++){
@@ -194,7 +240,9 @@ function Matrix(Observer){
 			rects2.append("title").text(function(d) {return d.toFixed(3); });
 		}
 		
+		
 	}
+	
 	function labeltimeslice(labeltype,timeind){
 		//右击标注时间片
 		let obj = {};

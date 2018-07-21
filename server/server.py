@@ -129,6 +129,10 @@ print("init uncertainty")
 typearr = np.array(["normal", "abnormal", "uncertain"])
 nodenum=soinn_node.shape[0]
 soinn_certainty=np.zeros((nodenum,3))#normal,abnormal,uncertain
+ceratinty_history=[]
+type_history=[]
+labelednode_history=[]
+
 for i in range(len(soinn_certainty)):
     soinn_certainty[i][2]=1
 print("connect2json")
@@ -498,9 +502,21 @@ class selectSoinnNode(tornado.web.RequestHandler):
 
 
 #======================soinn=============================
+def getchangednodes():
+    nodesarr=[]
+    if len(type_history)<2:
+        return nodesarr
+    else:
+        nowtype = type_history[-1]
+        pretype = type_history[-2]
+        for i in range(len(nowtype)):
+            if(nowtype[i]=="normal" and pretype[i]=="abnormal") or (nowtype[i]=="abnormal" and pretype[i]=="normal"):
+                nodesarr.append(i)
+        return nodesarr
+
 class init_soinn(tornado.web.RequestHandler):
   def get(self):
-    evt_unpacked = {'nodes': nodes,'links':links,'distance':soinn_distance.tolist()}
+    evt_unpacked = {'nodes': nodes,'links':links,'distance':soinn_distance.tolist(),'changednodes':getchangednodes(),'labelednode':labelednode_history}
     evt = json.dumps(evt_unpacked)
     self.write(evt)
 
@@ -532,11 +548,49 @@ class modifySoinn(tornado.web.RequestHandler):
     evt = json.dumps(evt_unpacked)
     self.write(evt)
 
+class nodeAffect(tornado.web.RequestHandler):
+  def get(self):
+    nodeid = int(json.loads(self.get_argument('nodeid')))
+    centernodes = json.loads(self.get_argument('labelednodes'))
+    k = len(centernodes)
+    cluster_id = []
+    cluster_type = []
+    distances = []
+    affectnodes=[]
+    incenter=0
+    for i in range(len(centernodes)):
+        if(centernodes[i]["id"]==nodeid):
+            incenter=1
+            break
+    if incenter==0:
+        for i in range(k):
+            cluster_id.append(int(centernodes[i]["id"]))
+            cluster_type.append(centernodes[i]["type"])
+        for j in range(k):
+            distances.append(soinn_distance[nodeid][cluster_id[j]])
+
+        for j in range(k):
+            den = sum([math.pow(distances[j] / float(distances[c]), 2) for c in range(k)])
+            den=1 / float(den)
+            print(cluster_id[j],den)
+            #if den>1/float(k):
+            #如果影响大于均值
+            affectnodes.append([cluster_id[j],den])
+    evt_unpacked = {'affectnodes': affectnodes}
+    evt = json.dumps(evt_unpacked)
+    self.write(evt)
+
 
 class labelSoinn(tornado.web.RequestHandler):
   def get(self):
     type=0 #type=0 uncertain也有概率; type=1 uncertain没有概率
-    centernodes=json.loads(self.get_argument('labelednodes'))
+    lbnode=(json.loads(self.get_argument('labelednodes')))
+    global labelednode_history
+    labelednode_history.append(lbnode)
+    centernodes=[]
+    for i in range(len(labelednode_history)):
+        centernodes.append(labelednode_history[i])
+    #centernodes=json.loads(self.get_argument('labelednodes'))
     normalthre = float(json.loads(self.get_argument('normalthre')))
     abnormalthre = float(json.loads(self.get_argument('abnormalthre')))
     # 初始化聚类中心
@@ -654,20 +708,6 @@ class labelSoinn(tornado.web.RequestHandler):
                     nodes[i]["type"] = "abnormal"
                 else:
                     nodes[i]["type"] = "uncertain"
-                '''
-                if (tmpnormal < normalthre and nodes[i]["certainty"][2] != 0):
-                    tmpnormal = 0
-                if (tmpabnormal < abnormalthre and nodes[i]["certainty"][2] != 0):
-                    tmpabnormal = 0
-                if tmpnormal == 0 and tmpabnormal == 0:
-                    nodes[i]["type"] = "uncertain"
-                elif tmpnormal > tmpabnormal:
-                    nodes[i]["type"] = "normal"
-                else:
-                    nodes[i]["type"] = "abnormal"
-                '''
-
-
         if totaldis<0.01:
             break
     #更新timematchnode
@@ -695,8 +735,18 @@ class labelSoinn(tornado.web.RequestHandler):
         else:
             if tmpresult[i]==1:
                 tpnum=tpnum+1
+    #存储certainty历史
+    global ceratinty_history,type_history
+    ceratinty_now = []
+    type_now=[]
+    for i in range(len(nodes)):
+        ceratinty_now.append(nodes[i]["certainty"])
+        type_now.append(nodes[i]["type"])
+    ceratinty_history.append(ceratinty_now)
+    type_history.append(type_now)
+
     print("totalnum",totalnum,"normalnum",normalnum,"tpnum",tpnum,"fpnum",fpnum)
-    evt_unpacked = {'nodes': nodes}
+    evt_unpacked = {'nodes': nodes,'changednodes':getchangednodes(),'labelednode':labelednode_history}
     evt = json.dumps(evt_unpacked)
     self.write(evt)
 
@@ -709,6 +759,16 @@ class resetLayout(tornado.web.RequestHandler):
     for i in range(len(nodes)):
         nodes[i]["feature"] = soinn_node_embedded[i].tolist()
     evt_unpacked = {'nodes': nodes,'links':links,'distance':soinn_distance.tolist()}
+    evt = json.dumps(evt_unpacked)
+    self.write(evt)
+
+class getHistory(tornado.web.RequestHandler):
+  def get(self):
+    nodeid=int(json.loads(self.get_argument('nodeid')))
+    nodehistory=[]
+    for i in range(len(ceratinty_history)):
+        nodehistory.append(ceratinty_history[i][nodeid])
+    evt_unpacked = {'history': nodehistory}
     evt = json.dumps(evt_unpacked)
     self.write(evt)
 #======================matrix=============================
@@ -1173,7 +1233,9 @@ class Application(tornado.web.Application):
       (r'/init_soinn', init_soinn),
       (r'/filterSoinnNode', filterSoinnNode),
       (r'/modifySoinn', modifySoinn),
+      (r'/nodeAffect', nodeAffect),
       (r'/labelSoinn', labelSoinn),
+      (r'/getHistory', getHistory),
       (r'/resetLayout', resetLayout),
       (r'/updateMatrix_node', updateMatrix_node),
       (r'/updateMatrix_time', updateMatrix_time),
